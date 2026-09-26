@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import CopyButton from "@/components/CopyButton";
 import FiatDisplay from "@/components/FiatDisplay";
 import { truncateAddress, formatStellarAmount, estimateStreamCompletionTime, formatTimeUntil } from "@/src/lib/sorostream";
@@ -52,6 +53,8 @@ interface StreamCardProps {
   endTime?: string;
   /** ISO timestamp captured when the stream was paused (freezes remaining balance). */
   pausedAt?: string;
+  /** Total amount already withdrawn from the stream in stroops. */
+  withdrawnStroops?: number;
   /** Token type (XLM, USDC, etc.) for proper USD conversion display. */
   token?: string;
   /** True when an on-chain transaction is in-flight for this stream. */
@@ -64,7 +67,32 @@ interface StreamCardProps {
   optimisticClaimable?: number;
 }
 
-export default function StreamCard({
+const areStreamCardEqual = (prev: StreamCardProps, next: StreamCardProps) => {
+  return (
+    prev.id === next.id &&
+    prev.sender === next.sender &&
+    prev.recipient === next.recipient &&
+    prev.flowRate === next.flowRate &&
+    prev.status === next.status &&
+    prev.deposit === next.deposit &&
+    prev.selected === next.selected &&
+    prev.loading === next.loading &&
+    prev.onToggle === next.onToggle &&
+    prev.onClone === next.onClone &&
+    prev.scheduledStartTime === next.scheduledStartTime &&
+    prev.startTime === next.startTime &&
+    prev.endTime === next.endTime &&
+    prev.pausedAt === next.pausedAt &&
+    prev.withdrawnStroops === next.withdrawnStroops &&
+    prev.token === next.token &&
+    prev.optimisticPending === next.optimisticPending &&
+    prev.optimisticStatus === next.optimisticStatus &&
+    prev.optimisticDeposit === next.optimisticDeposit &&
+    prev.optimisticClaimable === next.optimisticClaimable
+  );
+};
+
+const StreamCard = memo(function StreamCard({
   id = "",
   sender = "",
   recipient = "",
@@ -79,6 +107,7 @@ export default function StreamCard({
   startTime,
   endTime,
   pausedAt,
+  withdrawnStroops,
   token = "XLM",
   optimisticPending = false,
   optimisticStatus,
@@ -166,6 +195,8 @@ function statusBadgeClass(status: string): string {
     case "Ended":
     case "Completed":
       return "bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-400";
+    case "Not Started":
+      return "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300";
     case "Cancelled":
       return "bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-400";
     default:
@@ -361,4 +392,6 @@ function statusBadgeClass(status: string): string {
       <StreamTagChips streamId={id} />
     </div>
   );
-}
+}, areStreamCardEqual);
+
+export default StreamCard;

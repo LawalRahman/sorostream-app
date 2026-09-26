@@ -38,7 +38,7 @@ const meta: Meta<typeof StreamCard> = {
   argTypes: {
     status: {
       control: "select",
-      options: ["Active", "Paused", "Completed", "Ended", "Cancelled"],
+      options: ["Active", "Paused", "Completed", "Ended", "Not Started", "Cancelled"],
       description: "Stream lifecycle status.",
     },
     loading: {
@@ -135,6 +135,29 @@ export const Completed: Story = {
     status: "Completed",
     startTime: oneDayAgo,
     endTime: oneHourAgo,
+  },
+};
+
+/**
+ * Explicitly ended stream variant for the acceptance criteria.
+ */
+export const Ended: Story = {
+  args: {
+    status: "Ended",
+    startTime: oneDayAgo,
+    endTime: oneHourAgo,
+  },
+};
+
+/**
+ * Stream scheduled to start in the future. The state is distinct from Active
+ * and should render a neutral slate badge while the stream is not yet live.
+ */
+export const NotStarted: Story = {
+  args: {
+    status: "Not Started",
+    startTime: inSevenDays,
+    endTime: inThirtyDays,
   },
 };
 
@@ -330,6 +353,36 @@ export const LightBackground: Story = {
   ],
   args: {
     status: "Active",
+    startTime: oneDayAgo,
+    endTime: inThirtyDays,
+  },
+};
+
+export const DarkBackground: Story = {
+  name: "On dark background",
+  parameters: {
+    backgrounds: { default: "dark" },
+  },
+  decorators: [
+    (Story) => (
+      <div className="bg-slate-950 p-6 rounded-lg">
+        <Story />
+      </div>
+    ),
+  ],
+  args: {
+    status: "Paused",
+    startTime: oneDayAgo,
+    endTime: inThirtyDays,
+    pausedAt: oneHourAgo,
+  },
+};
+
+export const LongRecipientAddress: Story = {
+  name: "Long recipient address (truncation)",
+  args: {
+    status: "Active",
+    recipient: "GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6SOMETHINGVERYLONG",
     startTime: oneDayAgo,
     endTime: inThirtyDays,
   },

@@ -1,6 +1,6 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import StreamCard from "@/components/StreamCard";
 
 // ---------------------------------------------------------------------------
@@ -421,6 +421,32 @@ describe("StreamCard", () => {
     it("does not set aria-current when the stream is not selected", () => {
       renderCard({ id: "42", selected: false });
       expect(screen.getByRole("article")).not.toHaveAttribute("aria-current");
+    });
+  });
+
+  describe("memoization", () => {
+    it("does not re-run the bookmark hook when unrelated parent state changes", () => {
+      const renderSpy = vi.fn();
+      function WrapperWithState() {
+        const [count, setCount] = useState(0);
+        renderSpy(count);
+        return (
+          <>
+            <button type="button" onClick={() => setCount((n) => n + 1)}>
+              bump {count}
+            </button>
+            <StreamCard id="42" sender="GAAAA...SENDER" recipient="GBBBB...RECIP" flowRate={10_000_000} deposit={100_000_000} status="Active" token="XLM" />
+          </>
+        );
+      }
+
+      render(<WrapperWithState />);
+      expect(mockIsBookmarked).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByRole("button", { name: /bump 0/i }));
+
+      expect(mockIsBookmarked).toHaveBeenCalledTimes(1);
+      expect(renderSpy).toHaveBeenCalledTimes(2);
     });
   });
 });

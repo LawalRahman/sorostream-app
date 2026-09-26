@@ -1,62 +1,101 @@
-/**
- * Tests for stream creation form reset — fixes #486
- *
- * Verifies that handleCreateStream resets ALL form fields (including step,
- * memo, and confirmAmountInput) after a successful stream creation so the
- * user sees a fresh form instead of stale data.
- */
-import { describe, it, expect } from 'vitest';
-import * as fs from 'fs';
-import * as path from 'path';
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import NewStreamPage from "@/src/app/stream/new/page";
+import { FORM_DRAFT_KEY } from "@/src/lib/useFormPersist";
 
-// Read the source file once for all tests
-const src = fs.readFileSync(
-  path.resolve(__dirname, '../page.tsx'),
-  'utf8',
-);
+const push = vi.fn();
+const triggerStreamRefresh = vi.fn();
+const createStream = vi.fn();
 
-// Locate the FIRST clearDraft() call inside the success try-block.
-// The success path matches: `clearDraft();\n\n      setRecipient`
-// while the "Back to Form" clearDraft() is inside an onClick inline handler.
-const SUCCESS_ANCHOR = 'clearDraft();\n\n      setRecipient';
-const successResetStart = src.indexOf(SUCCESS_ANCHOR);
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push, replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
 
-// Find the router.push call that comes after the reset block
-const routerPushIdx = src.indexOf('router.push(', successResetStart);
+vi.mock("@/src/context/WalletContext", () => ({
+  useWallet: () => ({
+    address: "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ",
+    isConnecting: false,
+    error: null,
+    triggerStreamRefresh,
+  }),
+}));
 
-// Extract just the reset block (between clearDraft and router.push)
-const resetBlock = successResetStart >= 0 && routerPushIdx > successResetStart
-  ? src.slice(successResetStart, routerPushIdx)
-  : '';
+vi.mock("@/src/context/PreferencesContext", () => ({
+  usePreferences: () => ({
+    defaultToken: "USDC",
+    defaultDuration: 3600,
+    defaultCliffDuration: 0,
+  }),
+}));
 
-describe('handleCreateStream reset (#486) — source-level regression guards', () => {
-  it('finds the success-path reset block in the source file', () => {
-    expect(successResetStart).toBeGreaterThan(-1);
-    expect(routerPushIdx).toBeGreaterThan(successResetStart);
-    expect(resetBlock.length).toBeGreaterThan(0);
+vi.mock("@/src/context/SettingsContext", () => ({
+  useSettings: () => ({ streamThreshold: 10000, language: "en" }),
+}));
+
+vi.mock("@/src/lib/addressVerification", () => ({
+  verifyAddress: vi.fn().mockResolvedValue({
+    status: "verified",
+    address: "GB7B2XS7YYUWVLXUYG6EWBEYHV4WTUY5VWFDOXWOITVNHAJBMMRV7ZGO",
+    federationName: null,
+    accountExists: true,
+    error: null,
+    lastCheckedAt: Date.now(),
+  }),
+  canCreateStream: vi.fn((verification) => verification?.status !== "unverified"),
+}));
+
+vi.mock("@/src/lib/sorostream", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/sorostream")>();
+  return {
+    ...actual,
+    sorostream: {
+      ...actual.sorostream,
+      createStream,
+    },
+    getStreamCapConfig: vi.fn().mockResolvedValue({ maxDepositStroops: 10_000_000_000 }),
+    getCollateralConfig: vi.fn().mockResolvedValue({ basisPoints: 0 }),
+    checkIsNewSender: vi.fn().mockResolvedValue(false),
+    getGasFeeEstimate: vi.fn().mockResolvedValue({ gasFee: "100", fee: "100" }),
+    validateMetadataUri: vi.fn().mockReturnValue(""),
+  };
+});
+
+describe("Create stream happy path", () => {
+  beforeEach(() => {
+    push.mockReset();
+    triggerStreamRefresh.mockReset();
+    createStream.mockReset();
+    createStream.mockResolvedValue({ streamId: "new-stream-123" });
+    window.sessionStorage.clear();
   });
 
-  it('resets the wizard step to "recipient" after creation', () => {
-    expect(resetBlock).toContain('setStep("recipient")');
-  });
+  it("clears the saved draft and navigates after a successful create-stream flow", async () => {
+    const recipient = "GB7B2XS7YYUWVLXUYG6EWBEYHV4WTUY5VWFDOXWOITVNHAJBMMRV7ZGO";
+    const draft = { recipient, amount: "100", duration: 3600, selectedToken: "USDC", customTokenAddress: "", endDate: "", cliffDate: "" };
+    window.sessionStorage.setItem(FORM_DRAFT_KEY, JSON.stringify(draft));
 
-  it('resets the memo field after creation', () => {
-    expect(resetBlock).toContain('setMemo("")');
-  });
+    render(<NewStreamPage />);
 
-  it('resets the typed-amount confirmation input after creation', () => {
-    expect(resetBlock).toContain('setConfirmAmountInput("")');
-  });
+    const recipientInput = screen.getByTestId("recipient-input");
+    fireEvent.change(recipientInput, { target: { value: recipient } });
 
-  it('also resets the pre-existing fields (recipient, amount, duration)', () => {
-    expect(resetBlock).toContain('setRecipient("")');
-    expect(resetBlock).toContain('setAmount("")');
-    expect(resetBlock).toContain('setDuration(0)');
-  });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Next" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
 
-  it('setStep("recipient") comes before router.push so the reset executes before navigation', () => {
-    const stepResetIdx  = src.indexOf('setStep("recipient")', successResetStart);
-    expect(stepResetIdx).toBeGreaterThan(successResetStart);
-    expect(stepResetIdx).toBeLessThan(routerPushIdx);
+    const amountInput = await screen.findByLabelText(/amount/i);
+    fireEvent.change(amountInput, { target: { value: "100" } });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => expect(screen.getByTestId("confirm-sign-button")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("confirm-sign-button"));
+
+    await waitFor(() => expect(createStream).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/stream/new-stream-123?new=true"));
+    await waitFor(() => expect(window.sessionStorage.getItem(FORM_DRAFT_KEY)).toBeNull());
+    expect(triggerStreamRefresh).toHaveBeenCalledTimes(1);
   });
 });
