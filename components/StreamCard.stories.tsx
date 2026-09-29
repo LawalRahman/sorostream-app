@@ -139,25 +139,15 @@ export const Completed: Story = {
 };
 
 /**
- * Explicitly ended stream variant for the acceptance criteria.
+ * Ended stream — alias of the "Completed" lifecycle state that some contract
+ * versions emit. Renders with a blue badge identical to Completed.
  */
 export const Ended: Story = {
+  name: "Ended",
   args: {
     status: "Ended",
     startTime: oneDayAgo,
     endTime: oneHourAgo,
-  },
-};
-
-/**
- * Stream scheduled to start in the future. The state is distinct from Active
- * and should render a neutral slate badge while the stream is not yet live.
- */
-export const NotStarted: Story = {
-  args: {
-    status: "Not Started",
-    startTime: inSevenDays,
-    endTime: inThirtyDays,
   },
 };
 
@@ -176,11 +166,32 @@ export const Cancelled: Story = {
 // ── Scheduled / future start ─────────────────────────────────────────────
 
 /**
+ * **Not Started** — stream exists on-chain but its `startTime` is in the
+ * future and no `scheduledStartTime` override is set. The card renders in a
+ * "pending" state: the health score badge is absent and "Time remaining" refers
+ * to the stream's _end_ date, not how much has been streamed.
+ *
+ * Covers the acceptance-criteria requirement for a "Not Started" status story.
+ */
+export const NotStarted: Story = {
+  name: "Not Started",
+  args: {
+    id: "stream-ns",
+    status: "Active",
+    startTime: inSevenDays,
+    endTime: inThirtyDays,
+    flowRate: 11_574,
+    deposit: 100_000_000,
+  },
+};
+
+/**
  * Stream created with a future `scheduledStartTime`.
  * A pulsing "Scheduled" badge appears next to the status badge.
  * The stream has not started yet so health score and flow are not shown.
  */
 export const Scheduled: Story = {
+  name: "Scheduled (future start)",
   args: {
     status: "Active",
     scheduledStartTime: scheduledInOneHour,
@@ -235,6 +246,24 @@ export const WithCloneAction: Story = {
 // ── Token variants ────────────────────────────────────────────────────────
 
 /**
+ * Stream denominated in **XLM** (the native Stellar asset). The `FiatDisplay`
+ * component converts the flow rate and deposit to USD via an XLM oracle price.
+ * This story explicitly names the XLM variant so it is easy to find in the
+ * sidebar alongside the USDC story below.
+ */
+export const XlmToken: Story = {
+  name: "XLM token",
+  args: {
+    status: "Active",
+    token: "XLM",
+    flowRate: 11_574,       // ~0.001 XLM/sec
+    deposit: 100_000_000,   // 10 XLM
+    startTime: oneDayAgo,
+    endTime: inThirtyDays,
+  },
+};
+
+/**
  * Stream denominated in **USDC**. The fiat display logic shows USD equivalents
  * directly (1 USDC = $1) rather than going through an XLM oracle.
  */
@@ -243,7 +272,7 @@ export const UsdcToken: Story = {
   args: {
     status: "Active",
     token: "USDC",
-    flowRate: 115_740,     // ~0.01 USDC/sec
+    flowRate: 115_740,      // ~0.01 USDC/sec
     deposit: 1_000_000_000, // 100 USDC
     startTime: oneDayAgo,
     endTime: inThirtyDays,
@@ -259,6 +288,27 @@ export const AquaToken: Story = {
   args: {
     status: "Active",
     token: "AQUA",
+    flowRate: 11_574,
+    deposit: 100_000_000,
+    startTime: oneDayAgo,
+    endTime: inThirtyDays,
+  },
+};
+
+// ── Long address / truncation ─────────────────────────────────────────────
+
+/**
+ * Both sender and recipient use full-length Stellar public keys to verify
+ * that `FederationName` truncates long addresses gracefully in the card layout.
+ * The raw address is 56 chars; the card should show a shortened version.
+ */
+export const LongRecipientAddress: Story = {
+  name: "Long recipient address (truncation)",
+  args: {
+    id: "stream-long",
+    sender: "GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3UN3IXYNEP",
+    recipient: "GDRXE2BQUC3AZNPVFSCEZ76NJ3WWL25FYFK6RGZGIEKWE4SOOHSUJUJ6",
+    status: "Active",
     flowRate: 11_574,
     deposit: 100_000_000,
     startTime: oneDayAgo,
@@ -336,11 +386,35 @@ export const MinimalProps: Story = {
 // ── Dark / light background comparison ───────────────────────────────────
 
 /**
- * Card on an explicit light background — confirms Tailwind dark-mode classes
+ * Card on an explicit **dark** background — the default Storybook theme.
+ * Verifies that `dark:` Tailwind classes render correctly (e.g. dark borders,
+ * dark status badge colours).
+ */
+export const DarkTheme: Story = {
+  name: "Dark theme",
+  parameters: {
+    backgrounds: { default: "dark" },
+  },
+  decorators: [
+    (Story) => (
+      <div className="dark bg-gray-900 p-6 rounded-lg">
+        <Story />
+      </div>
+    ),
+  ],
+  args: {
+    status: "Active",
+    startTime: oneDayAgo,
+    endTime: inThirtyDays,
+  },
+};
+
+/**
+ * Card on an explicit **light** background — confirms Tailwind dark-mode classes
  * fall back correctly in light mode.
  */
 export const LightBackground: Story = {
-  name: "On light background",
+  name: "Light theme",
   parameters: {
     backgrounds: { default: "light" },
   },

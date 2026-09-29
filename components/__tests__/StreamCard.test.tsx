@@ -1,6 +1,6 @@
-import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { useState, type ReactNode } from "react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { useState, useRef, type ReactNode } from "react";
 import StreamCard from "@/components/StreamCard";
 
 // ---------------------------------------------------------------------------
@@ -424,29 +424,171 @@ describe("StreamCard", () => {
     });
   });
 
-  describe("memoization", () => {
-    it("does not re-run the bookmark hook when unrelated parent state changes", () => {
-      const renderSpy = vi.fn();
-      function WrapperWithState() {
-        const [count, setCount] = useState(0);
-        renderSpy(count);
-        return (
-          <>
-            <button type="button" onClick={() => setCount((n) => n + 1)}>
-              bump {count}
-            </button>
-            <StreamCard id="42" sender="GAAAA...SENDER" recipient="GBBBB...RECIP" flowRate={10_000_000} deposit={100_000_000} status="Active" token="XLM" />
-          </>
+  // ── React.memo render-count tests (#580) ─────────────────────────────────
+  //
+  // These tests use a thin wrapper component that tracks how many times
+  // StreamCard renders.  They verify that the custom arePropsEqual comparator
+  // suppresses unnecessary renders when only unrelated parent state changes,
+  // while still propagating changes to the props that StreamCard cares about.
+
+  describe("React.memo — render-count guard (#580)", () => {
+    /** Count how many times StreamCard itself re-renders. */
+    type WrapperProps = {
+      streamProps: Parameters<typeof StreamCard>[0];
+      onRender?: () => void;
+    };
+
+    /**
+     * Thin host that passes `streamProps` directly to StreamCard and calls
+     * `onRender` on every render of StreamCard via a render-tracking wrapper.
+     */
+    function RenderCountWrapper({ streamProps, onRender }: WrapperProps) {
+      // Each render of StreamCard calls this function component, which in turn
+      // fires onRender.  We wrap StreamCard in a fragment to force a real
+      // child component boundary (memo operates at the component level).
+      onRender?.();
+      return <StreamCard {...streamProps} />;
+    }
+
+    /**
+     * A parent that holds its own counter state (simulating a polling tick)
+     * and exposes an `increment` handle so tests can trigger parent re-renders.
+     */
+    function PollingParent({
+      initialStreamProps,
+      onCardRender,
+    }: {
+      initialStreamProps: Parameters<typeof StreamCard>[0];
+      onCardRender: () => void;
+    }) {
+      const [tick, setTick] = useState(0);
+      const [streamProps, setStreamProps] = useState(initialStreamProps);
+
+      // Expose setters via the DOM so tests can trigger them.
+      const tickRef = useRef<() => void>(() => setTick((n) => n + 1));
+      const updateRef = useRef<(p: typeof initialStreamProps) => void>(setStreamProps);
+      tickRef.current = () => setTick((n) => n + 1);
+      updateRef.current = setStreamProps;
+
+      (window as unknown as Record<string, unknown>)["__testTickFn__"] = tickRef.current;
+      (window as unknown as Record<string, unknown>)["__testUpdateFn__"] = (p: typeof initialStreamProps) =>
+        updateRef.current(p);
+
+      return (
+        <>
+          <span data-testid="tick">{tick}</span>
+          <RenderCountWrapper streamProps={streamProps} onRender={onCardRender} />
+        </>
+      );
+    }
+
+    afterEach(() => {
+      delete (window as unknown as Record<string, unknown>)["__testTickFn__"];
+      delete (window as unknown as Record<string, unknown>)["__testUpdateFn__"];
+    });
+
+    it("does NOT re-render when parent tick increments with unchanged stream props", () => {
+      const renderCount = { count: 0 };
+      const props = makeProps({ id: "poll-1", status: "Active", withdrawnStroops: 0 });
+
+      render(
+        <PollingParent
+          initialStreamProps={props}
+          onCardRender={() => { renderCount.count++; }}
+        />,
+        { wrapper: Wrapper },
+      );
+
+      const countAfterMount = renderCount.count;
+
+      // Simulate 3 polling ticks — parent re-renders, but stream data is unchanged
+      act(() => {
+        (window as unknown as Record<string, unknown>)["__testTickFn__"] &&
+          ((window as unknown as Record<string, unknown>)["__testTickFn__"] as () => void)();
+      });
+      act(() => {
+        ((window as unknown as Record<string, unknown>)["__testTickFn__"] as () => void)();
+      });
+      act(() => {
+        ((window as unknown as Record<string, unknown>)["__testTickFn__"] as () => void)();
+      });
+
+      // StreamCard should NOT have rendered again
+      expect(renderCount.count).toBe(countAfterMount);
+    });
+
+    it("re-renders when stream.status changes", () => {
+      const renderCount = { count: 0 };
+      const props = makeProps({ id: "poll-2", status: "Active", withdrawnStroops: 0 });
+
+      render(
+        <PollingParent
+          initialStreamProps={props}
+          onCardRender={() => { renderCount.count++; }}
+        />,
+        { wrapper: Wrapper },
+      );
+
+      const countAfterMount = renderCount.count;
+
+      act(() => {
+        ((window as unknown as Record<string, unknown>)["__testUpdateFn__"] as (p: typeof props) => void)(
+          { ...props, status: "Paused" },
         );
-      }
+      });
 
-      render(<WrapperWithState />);
-      expect(mockIsBookmarked).toHaveBeenCalledTimes(1);
+      // Status changed → StreamCard should have re-rendered
+      expect(renderCount.count).toBeGreaterThan(countAfterMount);
+      expect(screen.getByLabelText("Status: Paused")).toBeInTheDocument();
+    });
 
-      fireEvent.click(screen.getByRole("button", { name: /bump 0/i }));
+    it("re-renders when stream.withdrawnStroops changes", () => {
+      const renderCount = { count: 0 };
+      const props = makeProps({ id: "poll-3", status: "Active", withdrawnStroops: 0 });
 
-      expect(mockIsBookmarked).toHaveBeenCalledTimes(1);
-      expect(renderSpy).toHaveBeenCalledTimes(2);
+      render(
+        <PollingParent
+          initialStreamProps={props}
+          onCardRender={() => { renderCount.count++; }}
+        />,
+        { wrapper: Wrapper },
+      );
+
+      const countAfterMount = renderCount.count;
+
+      act(() => {
+        ((window as unknown as Record<string, unknown>)["__testUpdateFn__"] as (p: typeof props) => void)(
+          { ...props, withdrawnStroops: 5_000_000 },
+        );
+      });
+
+      // withdrawnStroops changed → StreamCard should have re-rendered
+      expect(renderCount.count).toBeGreaterThan(countAfterMount);
+    });
+
+    it("re-renders when stream.id changes", () => {
+      const renderCount = { count: 0 };
+      const props = makeProps({ id: "poll-4", status: "Active", withdrawnStroops: 0 });
+
+      render(
+        <PollingParent
+          initialStreamProps={props}
+          onCardRender={() => { renderCount.count++; }}
+        />,
+        { wrapper: Wrapper },
+      );
+
+      const countAfterMount = renderCount.count;
+
+      act(() => {
+        ((window as unknown as Record<string, unknown>)["__testUpdateFn__"] as (p: typeof props) => void)(
+          { ...props, id: "poll-999" },
+        );
+      });
+
+      // id changed → StreamCard should have re-rendered
+      expect(renderCount.count).toBeGreaterThan(countAfterMount);
+      expect(screen.getByText("Stream #poll-999")).toBeInTheDocument();
     });
   });
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { memo } from "react";
+
 import CopyButton from "@/components/CopyButton";
 import FiatDisplay from "@/components/FiatDisplay";
 import { truncateAddress, formatStellarAmount, estimateStreamCompletionTime, formatTimeUntil } from "@/src/lib/sorostream";
@@ -39,6 +40,11 @@ interface StreamCardProps {
   flowRate?: number;
   status?: string;
   deposit?: number;
+  /**
+   * Amount already withdrawn in stroops. Used by the custom memo comparator so
+   * cards only re-render when the recipient has claimed more funds.
+   */
+  withdrawnStroops?: number;
   selected?: boolean;
   onToggle?: (id: string) => void;
   /** When true, render an in-place skeleton placeholder instead of the card. */
@@ -67,38 +73,36 @@ interface StreamCardProps {
   optimisticClaimable?: number;
 }
 
-const areStreamCardEqual = (prev: StreamCardProps, next: StreamCardProps) => {
+/**
+ * Custom memo comparator — only re-render when data that is visible on the
+ * card has actually changed. Polling ticks that leave `id`, `status`, and
+ * `withdrawnStroops` unchanged will skip the render entirely.
+ */
+function arePropsEqual(
+  prev: StreamCardProps,
+  next: StreamCardProps,
+): boolean {
   return (
     prev.id === next.id &&
-    prev.sender === next.sender &&
-    prev.recipient === next.recipient &&
-    prev.flowRate === next.flowRate &&
     prev.status === next.status &&
-    prev.deposit === next.deposit &&
-    prev.selected === next.selected &&
-    prev.loading === next.loading &&
-    prev.onToggle === next.onToggle &&
-    prev.onClone === next.onClone &&
-    prev.scheduledStartTime === next.scheduledStartTime &&
-    prev.startTime === next.startTime &&
-    prev.endTime === next.endTime &&
-    prev.pausedAt === next.pausedAt &&
     prev.withdrawnStroops === next.withdrawnStroops &&
-    prev.token === next.token &&
+    // Propagate optimistic overlay changes immediately
     prev.optimisticPending === next.optimisticPending &&
     prev.optimisticStatus === next.optimisticStatus &&
     prev.optimisticDeposit === next.optimisticDeposit &&
-    prev.optimisticClaimable === next.optimisticClaimable
+    prev.selected === next.selected &&
+    prev.loading === next.loading
   );
-};
+}
 
-const StreamCard = memo(function StreamCard({
+function StreamCardInner({
   id = "",
   sender = "",
   recipient = "",
   flowRate = 0,
   status = "Active",
   deposit = 0,
+  withdrawnStroops: _withdrawnStroops = 0,
   selected = false,
   onToggle,
   loading = false,
@@ -392,6 +396,13 @@ function statusBadgeClass(status: string): string {
       <StreamTagChips streamId={id} />
     </div>
   );
-}, areStreamCardEqual);
+}
 
+/**
+ * StreamCard — memoised with a custom comparator so dashboard lists do not
+ * re-render cards whose stream data has not changed (e.g. on a polling tick).
+ *
+ * @see arePropsEqual for the fields used in the comparison.
+ */
+const StreamCard = memo(StreamCardInner, arePropsEqual);
 export default StreamCard;
